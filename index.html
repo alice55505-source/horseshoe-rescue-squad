@@ -147,16 +147,14 @@
     display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; padding:8px 10px;
     cursor:grab; touch-action:none;
   }
-  .size-chip .chip-shoe{display:block;}
+  .size-chip .chip-shoe{display:block; width:100%; height:100%;}
   .size-chip .chip-shoe .horseshoe-svg{width:100%; height:100%; overflow:visible;}
   .size-chip .chip-label{font-size:14px; font-weight:900; color:var(--gold-bright);}
   .shoe-arc.chip-arc{stroke-width:50; filter:none;}
-  .size-chip.dragging{position:fixed; z-index:200; pointer-events:none;}
-  .drop-target{
-    position:absolute; left:50%; top:50%; width:130px; height:60px; transform:translate(-50%,-50%);
-    border:3px dashed var(--gold-bright); border-radius:16px;
+  .size-chip.dragging{
+    position:fixed; z-index:200; pointer-events:none;
+    padding:0; border:none; background:transparent;
   }
-  .drop-target.filled{border-style:solid; border-color:var(--success);}
 
   /* level 5 — drag shoe to the fire, then onto the hoof */
   .fire-pit{
@@ -291,7 +289,7 @@
     <div class="screen" id="screen-4">
       <h2>第四關・選馬蹄鐵 📏</h2>
       <p class="instructions">把正確尺寸的馬蹄鐵拖曳到馬蹄上！</p>
-      <div class="shoe-area" id="shoe4"><div class="drop-target" id="dropTarget"></div></div>
+      <div class="shoe-area" id="shoe4"></div>
       <div id="size-tray"></div>
     </div>
 
@@ -845,14 +843,19 @@
   // ---- Level 4 ----
   var sizeTrayEl = document.getElementById("size-tray");
   var SIZE_DIMS = { XS:{w:48,h:43}, S:{w:64,h:58}, M:{w:82,h:74}, L:{w:102,h:92} };
+  // how big each size looks relative to the real hoof once picked up —
+  // M (correct) is sized to nearly cover the target outline; others read
+  // as visibly too small/too big against it
+  var SIZE_SCALE = { XS:0.6, S:0.8, M:1.0, L:1.25 };
   function buildLevel4(){
     var container = document.getElementById("shoe4");
-    svgFor(container, true); // choosing a shoe for the still-bare hoof
-    var dt = document.createElement("div");
-    dt.className = "drop-target";
-    dt.id = "dropTarget";
-    container.appendChild(dt);
-    els.dropTarget = dt;
+    var r = svgFor(container, true); // hoof only — shoe not chosen/fitted yet
+    var start = arcPoint(remapAngle(200)), end = arcPoint(remapAngle(340));
+    var outline = document.createElementNS(NS,"path");
+    outline.setAttribute("d","M "+start.x+" "+start.y+" A "+R+" "+R+" 0 1 1 "+end.x+" "+end.y);
+    outline.setAttribute("class","shoe-arc target-outline");
+    r.svg.appendChild(outline);
+    els.dropTarget = outline;
     var sizes = ["XS","S","M","L"];
     sizeTrayEl.innerHTML = "";
     sizes.forEach(function(sz){
@@ -865,21 +868,32 @@
       iconWrap.style.height = dims.h+"px";
       iconWrap.appendChild(buildShoeSvg("chip-arc").svg);
       chip.appendChild(iconWrap);
-      var startX,startY,origLeft,origTop,dragging=false;
+      var dragging = false;
+      function resetChip(){
+        chip.style.left=""; chip.style.top=""; chip.style.width=""; chip.style.height="";
+        iconWrap.style.width = dims.w+"px"; iconWrap.style.height = dims.h+"px";
+      }
       chip.addEventListener("pointerdown", function(ev){
         dragging = true;
         chip.setPointerCapture(ev.pointerId);
         chip.classList.add("dragging");
-        var rect = chip.getBoundingClientRect();
-        chip.style.width = rect.width+"px"; chip.style.height = rect.height+"px";
-        chip.style.left = rect.left+"px"; chip.style.top = rect.top+"px";
-        startX = ev.clientX; startY = ev.clientY;
-        origLeft = rect.left; origTop = rect.top;
+        // scale the icon up to roughly true size against the hoof so the
+        // player can actually compare — grown around the cursor, not the
+        // element's old (now-detached) layout position
+        var shoeRect = container.getBoundingClientRect();
+        var trueW = shoeRect.width * 0.82 * SIZE_SCALE[sz];
+        var trueH = trueW * (dims.h/dims.w);
+        iconWrap.style.width = trueW+"px";
+        iconWrap.style.height = trueH+"px";
+        chip.style.width = trueW+"px"; chip.style.height = trueH+"px";
+        chip.style.left = (ev.clientX - trueW/2)+"px";
+        chip.style.top = (ev.clientY - trueH/2)+"px";
       });
       chip.addEventListener("pointermove", function(ev){
         if (!dragging) return;
-        chip.style.left = (origLeft + (ev.clientX-startX))+"px";
-        chip.style.top = (origTop + (ev.clientY-startY))+"px";
+        var w = parseFloat(chip.style.width), h = parseFloat(chip.style.height);
+        chip.style.left = (ev.clientX - w/2)+"px";
+        chip.style.top = (ev.clientY - h/2)+"px";
       });
       chip.addEventListener("pointerup", function(ev){
         if (!dragging) return;
@@ -888,19 +902,24 @@
         var dropRect = els.dropTarget.getBoundingClientRect();
         var cx = ev.clientX, cy = ev.clientY;
         var hit = cx>=dropRect.left-20 && cx<=dropRect.right+20 && cy>=dropRect.top-20 && cy<=dropRect.bottom+20;
-        chip.style.left=""; chip.style.top=""; chip.style.width=""; chip.style.height="";
-        if (hit){
-          if (sz === CORRECT_SIZE){
-            sndSuccess();
-            els.dropTarget.classList.add("filled");
-            sizeTrayEl.querySelectorAll(".size-chip").forEach(function(c){ c.style.pointerEvents="none"; c.style.opacity = c===chip?"1":"0.35"; });
-            setTimeout(nextLevel, 550);
-          } else {
-            sndError();
-            chip.classList.add("shake");
-            showToast("尺寸不合喔，再試試！");
-            setTimeout(function(){ chip.classList.remove("shake"); }, 350);
-          }
+        if (hit && sz === CORRECT_SIZE){
+          sndSuccess();
+          var shoeRect = container.getBoundingClientRect();
+          var w = shoeRect.width * 0.82, h = w * (dims.h/dims.w);
+          chip.style.width = w+"px"; chip.style.height = h+"px";
+          chip.style.left = (shoeRect.left + (shoeRect.width-w)/2)+"px";
+          chip.style.top = (shoeRect.top + (shoeRect.height-h)/2)+"px";
+          iconWrap.style.width = w+"px"; iconWrap.style.height = h+"px";
+          outline.classList.add("gone");
+          sizeTrayEl.querySelectorAll(".size-chip").forEach(function(c){ c.style.pointerEvents="none"; if (c!==chip) c.style.opacity="0.35"; });
+          setTimeout(nextLevel, 550);
+        } else if (hit){
+          sndError();
+          chip.classList.add("shake");
+          showToast("尺寸不合喔，再試試！");
+          setTimeout(function(){ chip.classList.remove("shake"); resetChip(); }, 350);
+        } else {
+          resetChip();
         }
       });
       sizeTrayEl.appendChild(chip);
@@ -963,21 +982,24 @@
       drag.style.top = restY+"px";
     });
 
-    var dragging=false, startX, startY, origLeft, origTop;
+    var dragging=false;
     drag.onpointerdown = function(ev){
       dragging = true;
       drag.setPointerCapture(ev.pointerId);
-      drag.classList.add("dragging");
+      // capture size BEFORE switching to fixed (its containing block
+      // changes from .screen to the viewport, so any left/top read or
+      // set afterwards would be off) — then just center it on the cursor
       var rect = drag.getBoundingClientRect();
+      drag.classList.add("dragging");
       drag.style.width = rect.width+"px"; drag.style.height = rect.height+"px";
-      drag.style.left = rect.left+"px"; drag.style.top = rect.top+"px";
-      startX = ev.clientX; startY = ev.clientY;
-      origLeft = rect.left; origTop = rect.top;
+      drag.style.left = (ev.clientX - rect.width/2)+"px";
+      drag.style.top = (ev.clientY - rect.height/2)+"px";
     };
     drag.onpointermove = function(ev){
       if (!dragging) return;
-      drag.style.left = (origLeft + (ev.clientX-startX))+"px";
-      drag.style.top = (origTop + (ev.clientY-startY))+"px";
+      var w = parseFloat(drag.style.width), h = parseFloat(drag.style.height);
+      drag.style.left = (ev.clientX - w/2)+"px";
+      drag.style.top = (ev.clientY - h/2)+"px";
     };
     drag.onpointerup = function(ev){
       if (!dragging) return;
@@ -1188,16 +1210,18 @@
     var elapsed = 300 - state.timeLeft;
     state.scores[state.team] = elapsed;
     updateScoreboard();
-    if (state.team === "A"){
-      els.teamDoneTitle.textContent = "🎉 A 隊完成任務！";
-      els.teamDoneTime.textContent = fmtTimeCN(elapsed);
-      document.querySelector("#screen-teamdone .subtitle:nth-of-type(2)");
-      showScreen("screen-teamdone");
-    } else {
-      document.getElementById("finalScoreA").textContent = fmtTimeCN(state.scores.A);
-      document.getElementById("finalScoreB").textContent = fmtTimeCN(state.scores.B);
-      showScreen("screen-bothdone");
-    }
+    showToast("少一根釘子耶！該怎麼辦？");
+    setTimeout(function(){
+      if (state.team === "A"){
+        els.teamDoneTitle.textContent = "🎉 A 隊完成任務！";
+        els.teamDoneTime.textContent = fmtTimeCN(elapsed);
+        showScreen("screen-teamdone");
+      } else {
+        document.getElementById("finalScoreA").textContent = fmtTimeCN(state.scores.A);
+        document.getElementById("finalScoreB").textContent = fmtTimeCN(state.scores.B);
+        showScreen("screen-bothdone");
+      }
+    }, 1400);
   }
 
   function updateScoreboard(){
