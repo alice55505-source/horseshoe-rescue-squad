@@ -87,6 +87,8 @@
   .shoe-arc.hot{stroke:url(#hotGrad); filter:drop-shadow(0 0 26px #ff5a1f);}
   .shoe-arc.gone{opacity:0; transition:opacity .5s;}
   .nail-hole-deco{fill:#241408; opacity:.55;}
+  .hoof-fill{fill:url(#hoofGrad); stroke:#2e1f14; stroke-width:3; filter:drop-shadow(0 5px 6px rgba(0,0,0,.45));}
+  .hoof-frog{fill:#2e2015; opacity:.7;}
   .hoof-rough{fill:#c99a63; stroke:#8a6a3f; stroke-width:2; stroke-linejoin:round; transition:opacity .4s;}
   .hoof-rough.trimmed{opacity:0;}
   .fly-off{animation:flyoff .7s forwards;}
@@ -380,6 +382,11 @@
       <stop offset="45%" stop-color="#ff8a2c"/>
       <stop offset="100%" stop-color="#e5484d"/>
     </linearGradient>
+    <radialGradient id="hoofGrad" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#d8b789"/>
+      <stop offset="65%" stop-color="#9c7850"/>
+      <stop offset="100%" stop-color="#5a4230"/>
+    </radialGradient>
   </defs>
 </svg>
 
@@ -592,7 +599,8 @@
 
   /* ---------------- level builders ---------------- */
   // builds a standalone horseshoe <svg> (no nail holes) — reused for the
-  // main shoe-area render, the size-picker icons and the level-5 drag icon
+  // size-picker icons and the level-5 drag icon, where the shoe is being
+  // carried around and isn't sitting on a hoof yet
   function buildShoeSvg(extraClass){
     var svg = document.createElementNS(NS,"svg");
     svg.setAttribute("viewBox","0 0 "+VB_W+" "+VB_H);
@@ -604,20 +612,54 @@
     svg.appendChild(path);
     return { svg: svg, path: path };
   }
-  function svgFor(container){
+  // the hoof itself — a solid capsule the horseshoe wraps around, so the
+  // two are always visually distinct instead of the shoe floating alone
+  function buildHoofFill(){
+    var rOuter = R + 22; // matches the shoe band's outer edge, so the shoe sits flush on the rim
+    var startA = remapAngle(200), endA = remapAngle(340);
+    var start = arcPoint(startA, rOuter), end = arcPoint(endA, rOuter);
+    var midX = (start.x + end.x) / 2;
+    var midY = Math.max(start.y, end.y) + 24;
+    var hoof = document.createElementNS(NS,"path");
+    hoof.setAttribute("d",
+      "M "+start.x+" "+start.y+
+      " A "+rOuter+" "+rOuter+" 0 1 1 "+end.x+" "+end.y+
+      " Q "+midX+" "+midY+" "+start.x+" "+start.y+" Z");
+    hoof.setAttribute("class","hoof-fill");
+    var frog = document.createElementNS(NS,"path");
+    frog.setAttribute("d","M "+CX+" "+(CY-15)+" L "+(CX-14)+" "+(CY+70)+" L "+(CX+14)+" "+(CY+70)+" Z");
+    frog.setAttribute("class","hoof-frog");
+    var g = document.createElementNS(NS,"g");
+    g.appendChild(hoof);
+    g.appendChild(frog);
+    return g;
+  }
+  // renders the hoof plus (unless noShoe) the horseshoe fitted around it
+  function svgFor(container, noShoe){
     container.innerHTML = "";
-    var r = buildShoeSvg();
-    // decorative nail holes along the band, like a real horseshoe
-    NAIL_ANGLES.forEach(function(angle){
-      var p = arcPoint(angle, R);
-      var hole = document.createElementNS(NS,"circle");
-      hole.setAttribute("cx", p.x); hole.setAttribute("cy", p.y);
-      hole.setAttribute("r", 5);
-      hole.setAttribute("class","nail-hole-deco");
-      r.svg.appendChild(hole);
-    });
-    container.appendChild(r.svg);
-    return r;
+    var svg = document.createElementNS(NS,"svg");
+    svg.setAttribute("viewBox","0 0 "+VB_W+" "+VB_H);
+    svg.setAttribute("class","horseshoe-svg");
+    svg.appendChild(buildHoofFill());
+    var path = null;
+    if (!noShoe){
+      var start = arcPoint(remapAngle(200)), end = arcPoint(remapAngle(340));
+      path = document.createElementNS(NS,"path");
+      path.setAttribute("d","M "+start.x+" "+start.y+" A "+R+" "+R+" 0 1 1 "+end.x+" "+end.y);
+      path.setAttribute("class","shoe-arc");
+      svg.appendChild(path);
+      // decorative nail holes along the band, like a real horseshoe
+      NAIL_ANGLES.forEach(function(angle){
+        var p = arcPoint(angle, R);
+        var hole = document.createElementNS(NS,"circle");
+        hole.setAttribute("cx", p.x); hole.setAttribute("cy", p.y);
+        hole.setAttribute("r", 5);
+        hole.setAttribute("class","nail-hole-deco");
+        svg.appendChild(hole);
+      });
+    }
+    container.appendChild(svg);
+    return { svg: svg, path: path };
   }
 
   // ---- Level 1 ----
@@ -690,7 +732,9 @@
   }
   function buildLevel2(){
     var container = document.getElementById("shoe2");
-    var r = svgFor(container);
+    // no shoe yet at this point in the story — the old one was just
+    // pulled off, so the player is trimming the bare hoof
+    var r = svgFor(container, true);
     level2State.zones = [];
     level2State.done = 0;
     var variant = VARIANTS[state.team];
@@ -758,7 +802,7 @@
   var level3State = { bumps: [], done: 0 };
   function buildLevel3(){
     var container = document.getElementById("shoe3");
-    svgFor(container);
+    svgFor(container, true); // still bare hoof — filing it smooth before the new shoe goes on
     level3State.bumps = [];
     level3State.done = 0;
     var variant = VARIANTS[state.team];
@@ -803,7 +847,7 @@
   var SIZE_DIMS = { XS:{w:48,h:43}, S:{w:64,h:58}, M:{w:82,h:74}, L:{w:102,h:92} };
   function buildLevel4(){
     var container = document.getElementById("shoe4");
-    svgFor(container);
+    svgFor(container, true); // choosing a shoe for the still-bare hoof
     var dt = document.createElement("div");
     dt.className = "drop-target";
     dt.id = "dropTarget";
@@ -882,8 +926,13 @@
   function buildLevel5(){
     var container = document.getElementById("shoe5");
     container.innerHTML = "";
+    var svg5 = document.createElementNS(NS,"svg");
+    svg5.setAttribute("viewBox","0 0 "+VB_W+" "+VB_H);
+    svg5.setAttribute("class","horseshoe-svg");
+    svg5.appendChild(buildHoofFill());
     var outlineR = buildShoeSvg("target-outline");
-    container.appendChild(outlineR.svg);
+    svg5.appendChild(outlineR.svg.firstChild);
+    container.appendChild(svg5);
     level5State.heated = false;
     level5State.fitted = false;
 
