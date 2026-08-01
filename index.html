@@ -108,9 +108,15 @@
   .toast{
     position:absolute; top:14px; left:50%; transform:translateX(-50%); background:var(--danger); color:#fff;
     padding:10px 20px; border-radius:10px; font-weight:800; font-size:16px; opacity:0; pointer-events:none;
-    transition:opacity .2s, top .2s; z-index:80;
+    transition:opacity .2s, top .2s; z-index:80; text-align:center; max-width:80vw;
   }
   .toast.show{opacity:1; top:30px;}
+  .toast.center{
+    top:50%; left:50%; transform:translate(-50%,-50%) scale(.9);
+    font-size:26px; padding:22px 34px; border-radius:18px; box-shadow:0 10px 30px rgba(0,0,0,.5);
+    transition:opacity .25s, transform .25s;
+  }
+  .toast.center.show{ top:50%; transform:translate(-50%,-50%) scale(1); }
 
   /* trim zones / bump / marks / nails */
   .hot-zone{
@@ -535,10 +541,12 @@
     document.querySelectorAll(".screen").forEach(function(s){ s.classList.remove("active"); });
     document.getElementById(id).classList.add("active");
   }
-  function showToast(msg){
+  function showToast(msg, opts){
+    opts = opts || {};
     els.toast.textContent = msg;
+    els.toast.classList.toggle("center", !!opts.center);
     els.toast.classList.add("show");
-    setTimeout(function(){ els.toast.classList.remove("show"); }, 1200);
+    setTimeout(function(){ els.toast.classList.remove("show"); }, opts.duration || 1200);
   }
   function fmtTime(sec){
     var m = Math.floor(sec/60), s = sec%60;
@@ -1254,7 +1262,7 @@
     var elapsed = 300 - state.timeLeft;
     state.scores[state.team] = elapsed;
     updateScoreboard();
-    showToast("少一根釘子耶！該怎麼辦？");
+    showToast("少一根釘子耶！該怎麼辦？", { center:true, duration:2800 });
     setTimeout(function(){
       if (state.team === "A"){
         els.teamDoneTitle.textContent = "🎉 A 隊完成任務！";
@@ -1265,7 +1273,7 @@
         document.getElementById("finalScoreB").textContent = fmtTimeCN(state.scores.B);
         showScreen("screen-bothdone");
       }
-    }, 1400);
+    }, 2800);
   }
 
   function updateScoreboard(){
