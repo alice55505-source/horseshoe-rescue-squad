@@ -486,6 +486,49 @@
   function sndFire(){ tone(120,0.9,"sawtooth",0.05); tone(90,1.1,"sine",0.05,0.1); }
   function sndClean(){ tone(500,0.05,"square",0.08); }
 
+  /* ---------------- background music ---------------- */
+  // A synthesized, chiptune-style take on the famous "Land of Hope and
+  // Glory" theme from Elgar's Pomp and Circumstance March No. 1 (the
+  // melody is public domain) — built from the same oscillator helper as
+  // the sound effects above, since there are no audio files in this page.
+  var D3=146.83,G3=196.00,A3=220.00,D4=293.66,E4=329.63,FS4=369.99,
+      G4=392.00,A4=440.00,B4=493.88;
+  var BG_TEMPO_MS = 550; // ms per quarter beat
+  var BG_MELODY = [
+    [D4,1],[D4,1],[D4,1],[D4,1],
+    [G4,1.5],[FS4,0.5],[E4,1],[D4,1],
+    [E4,1],[FS4,1],[G4,1],[A4,1],
+    [B4,4],
+    [A4,1],[G4,1],[FS4,1],[E4,1],
+    [D4,4]
+  ];
+  var BG_BASS = [ [D3,4],[G3,4],[A3,4],[G3,4],[A3,4],[D3,4] ];
+  var bgMusicPlaying = false, bgMusicTimer = null;
+  function scheduleBgVoice(seq, type, vol){
+    var t = 0;
+    seq.forEach(function(n){
+      var freq = n[0], beats = n[1], durMs = beats * BG_TEMPO_MS;
+      tone(freq, durMs/1000*0.94, type, vol, t/1000);
+      t += durMs;
+    });
+    return t;
+  }
+  function playBgMusicLoop(){
+    if (!bgMusicPlaying) return;
+    var totalMs = scheduleBgVoice(BG_MELODY, "triangle", 0.05);
+    scheduleBgVoice(BG_BASS, "sine", 0.045);
+    bgMusicTimer = setTimeout(playBgMusicLoop, totalMs);
+  }
+  function startBgMusic(){
+    if (bgMusicPlaying || !soundOn) return;
+    bgMusicPlaying = true;
+    playBgMusicLoop();
+  }
+  function stopBgMusic(){
+    bgMusicPlaying = false;
+    if (bgMusicTimer){ clearTimeout(bgMusicTimer); bgMusicTimer = null; }
+  }
+
   /* ---------------- state ---------------- */
   var state = {
     team: "A",
@@ -1304,6 +1347,7 @@
   els.startBtn.addEventListener("click", function(){
     ac();
     startRun(state.pendingTeam);
+    startBgMusic();
   });
 
   els.switchTeamBtn.addEventListener("click", function(){
@@ -1375,6 +1419,7 @@
     state.scores = { A:null, B:null };
     state.timeLeft = 300; state.currentLevel = 0;
     pauseTimer();
+    stopBgMusic();
     updateScoreboard();
     updateTimerDisplay();
     setPhaseIdle();
@@ -1391,6 +1436,8 @@
   els.soundBtn.addEventListener("click", function(){
     soundOn = !soundOn;
     els.soundBtn.textContent = soundOn ? "🔊" : "🔇";
+    if (soundOn && state.currentLevel > 0) startBgMusic();
+    else stopBgMusic();
   });
 
   /* ---------------- init ---------------- */
