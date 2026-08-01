@@ -1237,12 +1237,12 @@
           safeCapture(nail, ev.pointerId);
           nail.classList.add("dragging");
           nail.style.left = (ev.clientX-11)+"px";
-          nail.style.top = (ev.clientY-22)+"px";
+          nail.style.top = (ev.clientY-11)+"px";
         });
         nail.addEventListener("pointermove", function(ev){
           if (!dragging) return;
           nail.style.left = (ev.clientX-11)+"px";
-          nail.style.top = (ev.clientY-22)+"px";
+          nail.style.top = (ev.clientY-11)+"px";
         });
         nail.addEventListener("pointerup", function(ev){
           if (!dragging) return;
