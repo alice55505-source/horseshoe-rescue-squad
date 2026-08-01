@@ -401,6 +401,16 @@
     return { x: CX + r * Math.cos(rad), y: CY + r * Math.sin(rad) };
   }
   function pct(v, total){ return (v/total*100).toFixed(2) + "%"; }
+  // pointer capture can occasionally throw (flaky touch hardware, or a
+  // pointer that ended between event and capture) — never let that abort
+  // the rest of a drag/rub handler
+  function safeCapture(el, id){ try { el.setPointerCapture(id); } catch(e){} }
+  // the horseshoe's visible metal sits lower than the geometric center of
+  // its viewBox/bounding box (the shape is a tall "U", not a centered
+  // ring), so centering a drag icon's box on the cursor leaves the actual
+  // metal a bit below the finger. This is that offset as a fraction of
+  // the icon's height, used to compensate when positioning drag icons.
+  var SHOE_VCENTER_OFFSET_RATIO = 0.078;
 
   // A real horseshoe is a nearly-closed ring (toe curving over the top,
   // a narrow gap between the two heels at the bottom) — not a thin,
@@ -414,14 +424,24 @@
     return NEW_DOMAIN_START + (a - OLD_DOMAIN_START) / OLD_DOMAIN_SPAN * NEW_DOMAIN_SPAN;
   }
 
+  // evenly spread n angles between from/to (old 200-340 scale) — used to
+  // generate plenty of separate rub/trim targets so several players can
+  // each grab a different spot at the same time
+  function spreadBumps(from, to, n, r){
+    var arr = [];
+    for (var i=0;i<n;i++){
+      arr.push({ angle: remapAngle(from + (to-from)*i/(n-1)), r: r });
+    }
+    return arr;
+  }
   var VARIANTS = {
     A: {
-      trimZones: [ {from:remapAngle(225), to:remapAngle(315)} ],
-      bumps: [ {angle:remapAngle(250), r:26}, {angle:remapAngle(295), r:26} ]
+      trimZones: [ {from:remapAngle(220), to:remapAngle(320)} ],
+      bumps: spreadBumps(215, 325, 6, 20)
     },
     B: {
-      trimZones: [ {from:remapAngle(207), to:remapAngle(243)}, {from:remapAngle(297), to:remapAngle(333)} ],
-      bumps: [ {angle:remapAngle(215), r:16}, {angle:remapAngle(245), r:16}, {angle:remapAngle(295), r:16}, {angle:remapAngle(325), r:16} ]
+      trimZones: [ {from:remapAngle(205), to:remapAngle(245)}, {from:remapAngle(295), to:remapAngle(335)} ],
+      bumps: spreadBumps(205, 335, 8, 15)
     }
   };
   var MARK_ANGLES = [235, 270, 305].map(remapAngle);
@@ -728,6 +748,7 @@
     var all = outerPts.concat(innerPts);
     return "M " + all.map(function(p){ return p.x+" "+p.y; }).join(" L ") + " Z";
   }
+  var TRIM_PIECES_PER_ZONE = 3;
   function buildLevel2(){
     var container = document.getElementById("shoe2");
     // no shoe yet at this point in the story — the old one was just
@@ -736,7 +757,19 @@
     level2State.zones = [];
     level2State.done = 0;
     var variant = VARIANTS[state.team];
+    // split every trim zone into several smaller pieces so multiple
+    // players can each grab a different spot at the same time
+    var pieces = [];
     variant.trimZones.forEach(function(z){
+      for (var p=0; p<TRIM_PIECES_PER_ZONE; p++){
+        pieces.push({
+          from: z.from + (z.to-z.from)*p/TRIM_PIECES_PER_ZONE,
+          to: z.from + (z.to-z.from)*(p+1)/TRIM_PIECES_PER_ZONE
+        });
+      }
+    });
+    level2State.total = pieces.length;
+    pieces.forEach(function(z){
       // overgrown, ragged hoof wall sticking out past the shoe's edge —
       // this is what actually looks "wrong" and needs trimming
       var roughEl = document.createElementNS(NS,"path");
@@ -756,7 +789,7 @@
         minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x);
         minY=Math.min(minY,p.y); maxY=Math.max(maxY,p.y);
       });
-      var pad = 16;
+      var pad = 14;
       minX-=pad; maxX+=pad; minY-=pad; maxY+=pad;
       var div = document.createElement("div");
       div.className = "hot-zone";
@@ -764,33 +797,35 @@
       div.style.top = pct(minY,VB_H);
       div.style.width = pct(maxX-minX,VB_W);
       div.style.height = pct(maxY-minY,VB_H);
-      var progress = 0, lastX=null, lastY=null, dragging=false, threshold=200;
-      function pointerMoveHandler(ev){
-        if (!dragging) return;
-        var x = ev.clientX, y = ev.clientY;
-        if (lastX!==null){
-          progress += Math.hypot(x-lastX, y-lastY);
-        }
-        lastX=x; lastY=y;
+      // multi-touch: every active finger on this piece tracks its own
+      // last position and contributes distance independently, so several
+      // players can rub the same patch together and finish it faster
+      var pointers = {};
+      var progress = 0, threshold = 130;
+      div.addEventListener("pointerdown", function(ev){
+        safeCapture(div, ev.pointerId);
+        pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+        var rect = div.getBoundingClientRect();
+        threshold = Math.max(55, Math.max(rect.width, rect.height) * 0.8);
+      });
+      div.addEventListener("pointermove", function(ev){
+        var p = pointers[ev.pointerId];
+        if (!p) return;
+        progress += Math.hypot(ev.clientX-p.x, ev.clientY-p.y);
+        p.x = ev.clientX; p.y = ev.clientY;
         if (progress > threshold && !div.classList.contains("done")){
           div.classList.add("done");
           roughEl.classList.add("trimmed");
           sndCut();
           level2State.done++;
-          if (level2State.done >= variant.trimZones.length){
+          if (level2State.done >= level2State.total){
             setTimeout(nextLevel, 500);
           }
         }
-      }
-      div.addEventListener("pointerdown", function(ev){
-        dragging = true; lastX=ev.clientX; lastY=ev.clientY;
-        var rect = div.getBoundingClientRect();
-        threshold = Math.max(70, Math.max(rect.width, rect.height) * 0.9);
-        div.setPointerCapture(ev.pointerId);
       });
-      div.addEventListener("pointermove", pointerMoveHandler);
-      div.addEventListener("pointerup", function(){ dragging=false; lastX=null; lastY=null; });
-      div.addEventListener("pointercancel", function(){ dragging=false; lastX=null; lastY=null; });
+      function endPointer(ev){ delete pointers[ev.pointerId]; }
+      div.addEventListener("pointerup", endPointer);
+      div.addEventListener("pointercancel", endPointer);
       container.appendChild(div);
       level2State.zones.push(div);
     });
@@ -813,9 +848,10 @@
       div.style.height = pct(size,VB_H);
       div.style.left = pct(p.x-b.r,VB_W);
       div.style.top = pct(p.y-b.r,VB_H);
-      var roughness = 100, dragging=false, lastT=0;
+      // multi-touch: any active pointer rubbing this bump contributes,
+      // so several players can file the same spot together
+      var roughness = 100, activePointers = {}, lastT=0;
       function rub(){
-        if (!dragging) return;
         var now = Date.now();
         if (now-lastT>70){ sndGrind(); lastT=now; }
         roughness -= 6;
@@ -831,10 +867,18 @@
           div.style.opacity = (0.35+0.65*roughness/100).toFixed(2);
         }
       }
-      div.addEventListener("pointerdown", function(ev){ dragging=true; div.setPointerCapture(ev.pointerId); rub(); });
-      div.addEventListener("pointermove", rub);
-      div.addEventListener("pointerup", function(){ dragging=false; });
-      div.addEventListener("pointercancel", function(){ dragging=false; });
+      div.addEventListener("pointerdown", function(ev){
+        safeCapture(div, ev.pointerId);
+        activePointers[ev.pointerId] = true;
+        rub();
+      });
+      div.addEventListener("pointermove", function(ev){
+        if (!activePointers[ev.pointerId]) return;
+        rub();
+      });
+      function endPointer(ev){ delete activePointers[ev.pointerId]; }
+      div.addEventListener("pointerup", endPointer);
+      div.addEventListener("pointercancel", endPointer);
       container.appendChild(div);
       level3State.bumps.push(div);
     });
@@ -875,7 +919,7 @@
       }
       chip.addEventListener("pointerdown", function(ev){
         dragging = true;
-        chip.setPointerCapture(ev.pointerId);
+        safeCapture(chip, ev.pointerId);
         chip.classList.add("dragging");
         // scale the icon up to roughly true size against the hoof so the
         // player can actually compare — grown around the cursor, not the
@@ -887,13 +931,13 @@
         iconWrap.style.height = trueH+"px";
         chip.style.width = trueW+"px"; chip.style.height = trueH+"px";
         chip.style.left = (ev.clientX - trueW/2)+"px";
-        chip.style.top = (ev.clientY - trueH/2)+"px";
+        chip.style.top = (ev.clientY - trueH/2 - trueH*SHOE_VCENTER_OFFSET_RATIO)+"px";
       });
       chip.addEventListener("pointermove", function(ev){
         if (!dragging) return;
         var w = parseFloat(chip.style.width), h = parseFloat(chip.style.height);
         chip.style.left = (ev.clientX - w/2)+"px";
-        chip.style.top = (ev.clientY - h/2)+"px";
+        chip.style.top = (ev.clientY - h/2 - h*SHOE_VCENTER_OFFSET_RATIO)+"px";
       });
       chip.addEventListener("pointerup", function(ev){
         if (!dragging) return;
@@ -985,7 +1029,7 @@
     var dragging=false;
     drag.onpointerdown = function(ev){
       dragging = true;
-      drag.setPointerCapture(ev.pointerId);
+      safeCapture(drag, ev.pointerId);
       // capture size BEFORE switching to fixed (its containing block
       // changes from .screen to the viewport, so any left/top read or
       // set afterwards would be off) — then just center it on the cursor
@@ -993,13 +1037,13 @@
       drag.classList.add("dragging");
       drag.style.width = rect.width+"px"; drag.style.height = rect.height+"px";
       drag.style.left = (ev.clientX - rect.width/2)+"px";
-      drag.style.top = (ev.clientY - rect.height/2)+"px";
+      drag.style.top = (ev.clientY - rect.height/2 - rect.height*SHOE_VCENTER_OFFSET_RATIO)+"px";
     };
     drag.onpointermove = function(ev){
       if (!dragging) return;
       var w = parseFloat(drag.style.width), h = parseFloat(drag.style.height);
       drag.style.left = (ev.clientX - w/2)+"px";
-      drag.style.top = (ev.clientY - h/2)+"px";
+      drag.style.top = (ev.clientY - h/2 - h*SHOE_VCENTER_OFFSET_RATIO)+"px";
     };
     drag.onpointerup = function(ev){
       if (!dragging) return;
@@ -1151,7 +1195,7 @@
         var dragging=false;
         nail.addEventListener("pointerdown", function(ev){
           dragging = true;
-          nail.setPointerCapture(ev.pointerId);
+          safeCapture(nail, ev.pointerId);
           nail.classList.add("dragging");
           nail.style.left = (ev.clientX-11)+"px";
           nail.style.top = (ev.clientY-22)+"px";
