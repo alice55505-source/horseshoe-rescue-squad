@@ -138,7 +138,7 @@
   }
   .nail-slot.filled{border-style:solid; border-color:var(--success); background:radial-gradient(circle,#e2e2e2,#8b8b8b);}
   .nail{
-    width:22px; height:44px; cursor:grab; touch-action:none; pointer-events:auto;
+    position:absolute; width:22px; height:44px; cursor:grab; touch-action:none; pointer-events:auto;
     filter:drop-shadow(0 3px 3px rgba(0,0,0,.5));
   }
   .nail .head{width:22px; height:22px; border-radius:50%; background:radial-gradient(circle at 35% 30%,#f0f0f0,#8b8b8b); margin:0 auto;}
@@ -379,6 +379,8 @@
   </div>
 </div>
 
+<audio id="bgMusic" src="pomp-circumstance.mp3" loop preload="auto"></audio>
+
 <svg width="0" height="0" style="position:absolute;">
   <defs>
     <linearGradient id="hotGrad" x1="0" y1="0" x2="1" y2="0">
@@ -487,46 +489,15 @@
   function sndClean(){ tone(500,0.05,"square",0.08); }
 
   /* ---------------- background music ---------------- */
-  // A synthesized, chiptune-style take on the famous "Land of Hope and
-  // Glory" theme from Elgar's Pomp and Circumstance March No. 1 (the
-  // melody is public domain) — built from the same oscillator helper as
-  // the sound effects above, since there are no audio files in this page.
-  var D3=146.83,G3=196.00,A3=220.00,D4=293.66,E4=329.63,FS4=369.99,
-      G4=392.00,A4=440.00,B4=493.88;
-  var BG_TEMPO_MS = 550; // ms per quarter beat
-  var BG_MELODY = [
-    [D4,1],[D4,1],[D4,1],[D4,1],
-    [G4,1.5],[FS4,0.5],[E4,1],[D4,1],
-    [E4,1],[FS4,1],[G4,1],[A4,1],
-    [B4,4],
-    [A4,1],[G4,1],[FS4,1],[E4,1],
-    [D4,4]
-  ];
-  var BG_BASS = [ [D3,4],[G3,4],[A3,4],[G3,4],[A3,4],[D3,4] ];
-  var bgMusicPlaying = false, bgMusicTimer = null;
-  function scheduleBgVoice(seq, type, vol){
-    var t = 0;
-    seq.forEach(function(n){
-      var freq = n[0], beats = n[1], durMs = beats * BG_TEMPO_MS;
-      tone(freq, durMs/1000*0.94, type, vol, t/1000);
-      t += durMs;
-    });
-    return t;
-  }
-  function playBgMusicLoop(){
-    if (!bgMusicPlaying) return;
-    var totalMs = scheduleBgVoice(BG_MELODY, "triangle", 0.05);
-    scheduleBgVoice(BG_BASS, "sine", 0.045);
-    bgMusicTimer = setTimeout(playBgMusicLoop, totalMs);
-  }
+  var bgMusicEl = document.getElementById("bgMusic");
+  bgMusicEl.volume = 0.45;
   function startBgMusic(){
-    if (bgMusicPlaying || !soundOn) return;
-    bgMusicPlaying = true;
-    playBgMusicLoop();
+    if (!soundOn) return;
+    var p = bgMusicEl.play();
+    if (p && p.catch) p.catch(function(){}); // ignore autoplay-policy rejections
   }
   function stopBgMusic(){
-    bgMusicPlaying = false;
-    if (bgMusicTimer){ clearTimeout(bgMusicTimer); bgMusicTimer = null; }
+    bgMusicEl.pause();
   }
 
   /* ---------------- state ---------------- */
@@ -1172,6 +1143,7 @@
       div.style.top = pct(p.y-size/2,VB_H);
       var clicks = 0;
       div.addEventListener("click", function(){
+        if (div.classList.contains("clean")) return; // already wiped — ignore extra taps
         clicks++;
         sndClean();
         div.style.opacity = Math.max(0, 1 - clicks/3).toFixed(2);
@@ -1209,8 +1181,11 @@
     });
 
     // scatter the nails across the whole screen — anywhere except on
-    // top of the shoe itself or the heading/instructions text
+    // top of the shoe itself, the heading/instructions text, or another
+    // already-placed nail (otherwise one can land on top of another and
+    // become impossible to grab, since the one on top eats all clicks)
     var NAIL_W = 26, NAIL_H = 48;
+    var placedSpots = [];
     function pickSpot(){
       var screenRect = screenEl.getBoundingClientRect();
       var shoeRect = container.getBoundingClientRect();
@@ -1223,13 +1198,27 @@
         bottom: shoeRect.bottom - screenRect.top + 20
       };
       var topMargin = (headingRect.bottom - screenRect.top) + 14;
-      for (var tries=0; tries<40; tries++){
+      var minSep = Math.max(NAIL_W, NAIL_H) * 1.4;
+      function hitsNail(x,y){
+        return placedSpots.some(function(s){
+          return Math.hypot(s.x-x, s.y-y) < minSep;
+        });
+      }
+      for (var tries=0; tries<60; tries++){
         var x = 12 + Math.random()*(screenRect.width - 24 - NAIL_W);
         var y = topMargin + Math.random()*Math.max(10, screenRect.height - topMargin - 12 - NAIL_H);
-        var overlap = !(x+NAIL_W < avoid.left || x > avoid.right || y+NAIL_H < avoid.top || y > avoid.bottom);
-        if (!overlap) return {x:x, y:y};
+        var overlapShoe = !(x+NAIL_W < avoid.left || x > avoid.right || y+NAIL_H < avoid.top || y > avoid.bottom);
+        if (!overlapShoe && !hitsNail(x,y)){
+          placedSpots.push({x:x,y:y});
+          return {x:x, y:y};
+        }
       }
-      return {x:12, y:topMargin};
+      // fall back to a spot offset from the last placed one so it's at
+      // least never exactly on top of another nail
+      var fx = 12 + (placedSpots.length * (NAIL_W+16)) % Math.max(40, screenRect.width - 24 - NAIL_W);
+      var fallback = {x:fx, y:topMargin};
+      placedSpots.push(fallback);
+      return fallback;
     }
 
     for (var i=0;i<7;i++){
@@ -1237,7 +1226,6 @@
       nail.className = "nail";
       nail.innerHTML = "<div class='head'></div><div class='shaft'></div>";
       var spot = pickSpot();
-      nail.style.position = "absolute";
       nail.style.left = spot.x+"px";
       nail.style.top = spot.y+"px";
       nail.dataset.restX = spot.x;
@@ -1420,6 +1408,7 @@
     state.timeLeft = 300; state.currentLevel = 0;
     pauseTimer();
     stopBgMusic();
+    bgMusicEl.currentTime = 0;
     updateScoreboard();
     updateTimerDisplay();
     setPhaseIdle();
